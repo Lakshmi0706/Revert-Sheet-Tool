@@ -1,10 +1,29 @@
 import streamlit as st
 import pandas as pd
+import sqlite3
 
-st.set_page_config(page_title="Workflow Tool", layout="wide")
-st.title("🔐 Role-Based Workflow Tool")
+st.set_page_config(layout="wide")
+st.title("🌐 Live Workflow Tool (Multi User)")
 
-# ✅ USERS (LOGIN)
+# ✅ DATABASE CONNECTION
+conn = sqlite3.connect("workflow.db", check_same_thread=False)
+cursor = conn.cursor()
+
+# ✅ CREATE TABLE
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS workflow (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sap_id TEXT,
+    name TEXT,
+    agree_disagree TEXT,
+    auditor_status TEXT,
+    sme_status TEXT,
+    final_status TEXT
+)
+""")
+conn.commit()
+
+# ✅ LOGIN USERS
 users = {
     "coder": {"password": "123", "role": "CODER"},
     "auditor": {"password": "123", "role": "AUDITOR"},
@@ -12,24 +31,22 @@ users = {
     "pdoa": {"password": "123", "role": "PDOA"},
 }
 
-# ✅ SESSION
+# ✅ LOGIN STATE
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 
-# ✅ LOGIN SCREEN
+# ✅ LOGIN PAGE
 if not st.session_state.logged_in:
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
+    u = st.text_input("Username")
+    p = st.text_input("Password", type="password")
 
     if st.button("Login"):
-        if username in users and users[username]["password"] == password:
+        if u in users and users[u]["password"] == p:
             st.session_state.logged_in = True
-            st.session_state.role = users[username]["role"]
-            st.success(f"Logged in as {st.session_state.role}")
+            st.session_state.role = users[u]["role"]
             st.rerun()
         else:
             st.error("Invalid credentials")
-
     st.stop()
 
 # ✅ LOGOUT
@@ -40,82 +57,87 @@ if st.button("Logout"):
 role = st.session_state.role
 st.subheader(f"Logged in as: {role}")
 
-# ✅ FILE UPLOAD
-uploaded_file = st.file_uploader("Upload Excel file", type=["xlsx"])
+# ✅ LOAD DATA FROM DB
+def load_data():
+    return pd.read_sql("SELECT * FROM workflow", conn)
 
-if uploaded_file is not None:
+# ✅ SAVE DATA TO DB
+def save_data(df):
+    df.to_sql("workflow", conn, if_exists="replace", index=False)
 
-    df = pd.read_excel(uploaded_file, engine="openpyxl")
-    df.columns = df.columns.str.strip()
+df = load_data()
 
-    # ✅ BUCKETS
-    coder_rows = []
-    auditor_rows = []
-    sme_rows = []
-    pdoa_rows = []
+# ✅ FIRST TIME DATA LOAD
+if df.empty:
+    st.info("Upload Excel file (only first time)")
+    file = st.file_uploader("Upload", type=["xlsx"])
 
-    # ✅ MAIN WORKFLOW LOGIC
-    for _, row in df.iterrows():
+    if file is not None:
+        new_df = pd.read_excel(file, engine="openpyxl")
+        new_df.columns = new_df.columns.str.strip()
 
-        coder = str(row.get("Agree/Disagree", "")).strip().upper()
-        auditor = str(row.get("Auditor's Review Status", "")).strip().upper()
-        sme = str(row.get("SME Status", "")).strip().upper()
+        # ✅ Map your columns
+        new_df = new_df.rename(columns={
+            "SAP ID": "sap_id",
+            "Name": "name",
+            "Agree/Disagree": "agree_disagree",
+            "Auditor's Review Status": "auditor_status",
+            "SME Status": "sme_status",
+            "Final Status": "final_status"
+        })
 
-        # ✅ SME → PDOA
-        if sme not in ["", "NAN"]:
-            row["Final Status"] = "COMPLETED"
-            pdoa_rows.append(row)
+        new_df = new_df[["sap_id", "name", "agree_disagree",
+                         "auditor_status", "sme_status", "final_status"]]
 
-        # ✅ AUDITOR → SME
-        elif auditor not in ["", "NAN"]:
-            sme_rows.append(row)
+        save_data(new_df)
+        st.success("Data loaded ✅")
+        st.rerun()
 
-        # ✅ CODER → AUDITOR (ONLY DISAGREE)
-        elif coder == "DISAGREE":
-            auditor_rows.append(row)
+    st.stop()
 
-        # ✅ CODER (AGREE stays here ✅)
-        else:
-            coder_rows.append(row)
+# ✅ PROCESS WORKFLOW
+df["agree_disagree"] = df["agree_disagree"].fillna("")
+df["auditor_status"] = df["auditor_status"].fillna("")
+df["sme_status"] = df["sme_status"].fillna("")
 
-    # ✅ CONVERT
-    coder_df = pd.DataFrame(coder_rows)
-    auditor_df = pd.DataFrame(auditor_rows)
-    sme_df = pd.DataFrame(sme_rows)
-    pdoa_df = pd.DataFrame(pdoa_rows)
+coder_df = df[(df["agree_disagree"] != "DISAGREE") & (df["auditor_status"] == "")]
+auditor_df = df[df["agree_disagree"].str.upper() == "DISAGREE"]
+sme_df = df[(df["agree_disagree"].str.upper() == "DISAGREE") & (df["auditor_status"] != "")]
+pdoa_df = df[df["sme_status"] != ""]
 
-    st.success("✅ Workflow processed successfully!")
+# ✅ ROLE VIEWS
 
-    # ✅ ROLE-BASED DISPLAY
-    if role == "CODER":
-        st.subheader("📌 CODER VIEW")
-        st.dataframe(coder_df)
+# 👤 CODER
+if role == "CODER":
+    st.subheader("CODER - Update Agree/Disagree")
+    edited = st.data_editor(coder_df, num_rows="dynamic")
 
-    elif role == "AUDITOR":
-        st.subheader("📌 AUDITOR VIEW (Only DISAGREE items)")
-        st.dataframe(auditor_df)
+# 👤 AUDITOR
+elif role == "AUDITOR":
+    st.subheader("AUDITOR - Only DISAGREE items")
+    edited = st.data_editor(auditor_df, num_rows="dynamic")
 
-    elif role == "SME":
-        st.subheader("📌 SME VIEW")
-        st.dataframe(sme_df)
+# 👤 SME
+elif role == "SME":
+    st.subheader("SME - Review")
+    edited = st.data_editor(sme_df, num_rows="dynamic")
 
-    elif role == "PDOA":
-        st.subheader("📌 PDOA VIEW (Completed)")
-        st.dataframe(pdoa_df)
+# 👤 PDOA
+elif role == "PDOA":
+    st.subheader("PDOA - Completed")
+    st.dataframe(pdoa_df)
+    edited = None
 
-    # ✅ SAVE OUTPUT FILE
-    output_file = "workflow_output.xlsx"
+# ✅ SAVE CHANGES (LIVE UPDATE)
+if edited is not None:
+    if st.button("✅ Save Changes"):
+        for i in edited.index:
+            df.loc[i, edited.columns] = edited.loc[i]
 
-    with pd.ExcelWriter(output_file, engine="openpyxl") as writer:
-        coder_df.to_excel(writer, sheet_name="CODER", index=False)
-        auditor_df.to_excel(writer, sheet_name="AUDITOR", index=False)
-        sme_df.to_excel(writer, sheet_name="SME", index=False)
-        pdoa_df.to_excel(writer, sheet_name="PDOA", index=False)
+        # ✅ Final Status update
+        df.loc[df["sme_status"] != "", "final_status"] = "COMPLETED"
 
-    # ✅ DOWNLOAD
-    with open(output_file, "rb") as f:
-        st.download_button(
-            "⬇️ Download Workflow File",
-            data=f,
-            file_name=output_file
-        )
+        save_data(df)
+        st.success("✅ Saved & Moved to Next Stage")
+        st.rerun()
+``
