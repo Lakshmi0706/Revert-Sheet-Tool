@@ -79,7 +79,7 @@ if df.empty:
         new_df = pd.read_excel(file, engine="openpyxl")
         new_df.columns = new_df.columns.str.strip()
 
-        # ✅ MAP COLUMNS (VERY IMPORTANT)
+        # ✅ MAP COLUMNS
         new_df = new_df.rename(columns={
             "SAP ID": "sap_id",
             "Name": "name",
@@ -89,14 +89,16 @@ if df.empty:
             "Final Status": "final_status"
         })
 
-        new_df = new_df[[
-            "sap_id",
-            "name",
-            "agree_disagree",
-            "auditor_status",
-            "sme_status",
-            "final_status"
-        ]]
+        new_df = new_df[
+            [
+                "sap_id",
+                "name",
+                "agree_disagree",
+                "auditor_status",
+                "sme_status",
+                "final_status",
+            ]
+        ]
 
         save_data(new_df)
         st.success("✅ Data loaded")
@@ -109,7 +111,7 @@ df["agree_disagree"] = df["agree_disagree"].fillna("").str.upper()
 df["auditor_status"] = df["auditor_status"].fillna("")
 df["sme_status"] = df["sme_status"].fillna("")
 
-# ✅ WORKFLOW FILTERS
+# ✅ WORKFLOW FILTERS (FIXED ✅)
 
 coder_df = df[(df["agree_disagree"] != "DISAGREE") & (df["auditor_status"] == "")]
 auditor_df = df[df["agree_disagree"] == "DISAGREE"]
@@ -140,11 +142,10 @@ elif role == "PDOA":
 if edited is not None:
     if st.button("✅ Save Changes"):
 
-        # Update original DF
         for idx in edited.index:
             df.loc[idx, edited.columns] = edited.loc[idx]
 
-        # Final Status
+        # ✅ Final Status update
         df.loc[df["sme_status"] != "", "final_status"] = "COMPLETED"
 
         save_data(df)
