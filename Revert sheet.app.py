@@ -55,7 +55,7 @@ if st.button("Logout"):
     st.rerun()
 
 role = st.session_state.role
-st.subheader(f"Logged in as: {role}")
+st.subheader("Logged in as: " + role)
 
 # ✅ LOAD DATA
 def load_data():
@@ -96,12 +96,12 @@ if df.empty:
                 "agree_disagree",
                 "auditor_status",
                 "sme_status",
-                "final_status",
+                "final_status"
             ]
         ]
 
         save_data(new_df)
-        st.success("✅ Data loaded")
+        st.success("Data loaded successfully")
         st.rerun()
 
     st.stop()
@@ -111,17 +111,15 @@ df["agree_disagree"] = df["agree_disagree"].fillna("").str.upper()
 df["auditor_status"] = df["auditor_status"].fillna("")
 df["sme_status"] = df["sme_status"].fillna("")
 
-# ✅ WORKFLOW FILTERS (FIXED ✅)
-
+# ✅ WORKFLOW LOGIC
 coder_df = df[(df["agree_disagree"] != "DISAGREE") & (df["auditor_status"] == "")]
 auditor_df = df[df["agree_disagree"] == "DISAGREE"]
 sme_df = df[(df["agree_disagree"] == "DISAGREE") & (df["auditor_status"] != "")]
 pdoa_df = df[df["sme_status"] != ""]
 
-# ✅ ROLE VIEWS
-
 edited = None
 
+# ✅ ROLE VIEWS
 if role == "CODER":
     st.subheader("CODER - Update Agree/Disagree")
     edited = st.data_editor(coder_df, use_container_width=True)
@@ -138,17 +136,16 @@ elif role == "PDOA":
     st.subheader("PDOA - Completed")
     st.dataframe(pdoa_df)
 
-# ✅ SAVE LOGIC
+# ✅ SAVE CHANGES
 if edited is not None:
-    if st.button("✅ Save Changes"):
+    if st.button("Save Changes"):
 
         for idx in edited.index:
             df.loc[idx, edited.columns] = edited.loc[idx]
 
-        # ✅ Final Status update
+        # ✅ FINAL STATUS
         df.loc[df["sme_status"] != "", "final_status"] = "COMPLETED"
 
         save_data(df)
-        st.success("✅ Saved successfully")
+        st.success("Saved successfully")
         st.rerun()
-``
