@@ -7,10 +7,9 @@ st.title("🌐 Live Workflow Tool (Multi User)")
 
 # ✅ DATABASE CONNECTION
 conn = sqlite3.connect("workflow.db", check_same_thread=False)
-cursor = conn.cursor()
 
 # ✅ CREATE TABLE
-cursor.execute("""
+conn.execute("""
 CREATE TABLE IF NOT EXISTS workflow (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     sap_id TEXT,
@@ -31,52 +30,56 @@ users = {
     "pdoa": {"password": "123", "role": "PDOA"},
 }
 
-# ✅ LOGIN STATE
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
+# ✅ SESSION
+if "login" not in st.session_state:
+    st.session_state.login = False
 
 # ✅ LOGIN PAGE
-if not st.session_state.logged_in:
+if not st.session_state.login:
     u = st.text_input("Username")
     p = st.text_input("Password", type="password")
 
     if st.button("Login"):
         if u in users and users[u]["password"] == p:
-            st.session_state.logged_in = True
+            st.session_state.login = True
             st.session_state.role = users[u]["role"]
             st.rerun()
         else:
             st.error("Invalid credentials")
+
     st.stop()
 
 # ✅ LOGOUT
 if st.button("Logout"):
-    st.session_state.logged_in = False
+    st.session_state.login = False
     st.rerun()
 
 role = st.session_state.role
 st.subheader(f"Logged in as: {role}")
 
-# ✅ LOAD DATA FROM DB
+# ✅ LOAD DATA
 def load_data():
-    return pd.read_sql("SELECT * FROM workflow", conn)
+    try:
+        return pd.read_sql("SELECT * FROM workflow", conn)
+    except:
+        return pd.DataFrame()
 
-# ✅ SAVE DATA TO DB
+# ✅ SAVE DATA
 def save_data(df):
     df.to_sql("workflow", conn, if_exists="replace", index=False)
 
 df = load_data()
 
-# ✅ FIRST TIME DATA LOAD
+# ✅ FIRST TIME UPLOAD
 if df.empty:
-    st.info("Upload Excel file (only first time)")
-    file = st.file_uploader("Upload", type=["xlsx"])
+    st.warning("Upload Excel file (first time only)")
+    file = st.file_uploader("Upload Excel", type=["xlsx"])
 
     if file is not None:
         new_df = pd.read_excel(file, engine="openpyxl")
         new_df.columns = new_df.columns.str.strip()
 
-        # ✅ Map your columns
+        # ✅ MAP COLUMNS (VERY IMPORTANT)
         new_df = new_df.rename(columns={
             "SAP ID": "sap_id",
             "Name": "name",
@@ -86,58 +89,65 @@ if df.empty:
             "Final Status": "final_status"
         })
 
-        new_df = new_df[["sap_id", "name", "agree_disagree",
-                         "auditor_status", "sme_status", "final_status"]]
+        new_df = new_df[[
+            "sap_id",
+            "name",
+            "agree_disagree",
+            "auditor_status",
+            "sme_status",
+            "final_status"
+        ]]
 
         save_data(new_df)
-        st.success("Data loaded ✅")
+        st.success("✅ Data loaded")
         st.rerun()
 
     st.stop()
 
-# ✅ PROCESS WORKFLOW
-df["agree_disagree"] = df["agree_disagree"].fillna("")
+# ✅ CLEAN VALUES
+df["agree_disagree"] = df["agree_disagree"].fillna("").str.upper()
 df["auditor_status"] = df["auditor_status"].fillna("")
 df["sme_status"] = df["sme_status"].fillna("")
 
+# ✅ WORKFLOW FILTERS
+
 coder_df = df[(df["agree_disagree"] != "DISAGREE") & (df["auditor_status"] == "")]
-auditor_df = df[df["agree_disagree"].str.upper() == "DISAGREE"]
-sme_df = df[(df["agree_disagree"].str.upper() == "DISAGREE") & (df["auditor_status"] != "")]
+auditor_df = df[df["agree_disagree"] == "DISAGREE"]
+sme_df = df[(df["agree_disagree"] == "DISAGREE") & (df["auditor_status"] != "")]
 pdoa_df = df[df["sme_status"] != ""]
 
 # ✅ ROLE VIEWS
 
-# 👤 CODER
+edited = None
+
 if role == "CODER":
     st.subheader("CODER - Update Agree/Disagree")
-    edited = st.data_editor(coder_df, num_rows="dynamic")
+    edited = st.data_editor(coder_df, use_container_width=True)
 
-# 👤 AUDITOR
 elif role == "AUDITOR":
-    st.subheader("AUDITOR - Only DISAGREE items")
-    edited = st.data_editor(auditor_df, num_rows="dynamic")
+    st.subheader("AUDITOR - DISAGREE Items")
+    edited = st.data_editor(auditor_df, use_container_width=True)
 
-# 👤 SME
 elif role == "SME":
     st.subheader("SME - Review")
-    edited = st.data_editor(sme_df, num_rows="dynamic")
+    edited = st.data_editor(sme_df, use_container_width=True)
 
-# 👤 PDOA
 elif role == "PDOA":
     st.subheader("PDOA - Completed")
     st.dataframe(pdoa_df)
-    edited = None
 
-# ✅ SAVE CHANGES (LIVE UPDATE)
+# ✅ SAVE LOGIC
 if edited is not None:
     if st.button("✅ Save Changes"):
-        for i in edited.index:
-            df.loc[i, edited.columns] = edited.loc[i]
 
-        # ✅ Final Status update
+        # Update original DF
+        for idx in edited.index:
+            df.loc[idx, edited.columns] = edited.loc[idx]
+
+        # Final Status
         df.loc[df["sme_status"] != "", "final_status"] = "COMPLETED"
 
         save_data(df)
-        st.success("✅ Saved & Moved to Next Stage")
+        st.success("✅ Saved successfully")
         st.rerun()
 ``
